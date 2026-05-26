@@ -255,7 +255,7 @@ def main() -> None:
             scored_df=optimized_scored,
             method="Optimized RAG",
             retrieval_setup="BM25 retrieval top-5",
-            prompt_name="Strict grounded prompt",
+            prompt_name="Base prompt",
             llm="qwen2.5:7b",
         ),
     ]
