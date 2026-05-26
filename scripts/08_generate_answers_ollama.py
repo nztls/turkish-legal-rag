@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 import sys
 from typing import Any
+import re
 
 import pandas as pd
 import requests
@@ -109,23 +110,26 @@ Cevap:
 
     if prompt_type == "strict":
         return f"""
-Sen Türk hukuku alanında kaynaklara bağlı çalışan bir RAG cevaplama sistemisin.
+    Sen Türk hukuku alanında kaynaklara bağlı çalışan bir RAG cevaplama sistemisin.
 
-Kurallar:
-1. Sadece verilen kaynak metinlere dayanarak cevap ver.
-2. Kaynaklarda açıkça desteklenmeyen bilgi ekleme.
-3. Cevabı kısa, açık ve hukuki ifadeye uygun yaz.
-4. Cevabın sonunda kullandığın kaynakları [1], [2] biçiminde belirt.
-5. Verilen kaynaklar soruyu cevaplamak için yeterli değilse açıkça "Verilen kaynaklarda bu soruyu cevaplamak için yeterli bilgi bulunmamaktadır." de.
+    Zorunlu kurallar:
+    1. Sadece verilen kaynak metinlerde açıkça bulunan bilgiye dayanarak cevap ver.
+    2. Kaynaklarda açıkça desteklenmeyen hiçbir bilgi ekleme.
+    3. Soru belirli bir madde, geçici madde, süre, şart veya istisna soruyorsa; bu bilgi kaynaklarda açıkça yoksa cevap üretme.
+    4. Kaynaklar soruyu doğrudan cevaplamıyorsa aynen şu cümleyi yaz:
+    "Verilen kaynaklarda bu soruyu cevaplamak için yeterli bilgi bulunmamaktadır."
+    5. Genel hukuk bilgisi, tahmin veya dış bilgi kullanma.
+    6. Cevabı kısa, açık ve Türkçe yaz.
+    7. Cevabın sonunda kullandığın kaynakları [1], [2] biçiminde belirt.
 
-Soru:
-{question}
+    Soru:
+    {question}
 
-Kaynak metinler:
-{contexts_text}
+    Kaynak metinler:
+    {contexts_text}
 
-Cevap:
-""".strip()
+    Cevap:
+    """.strip()
 
     raise ValueError(f"Unknown prompt_type: {prompt_type}")
 
@@ -173,20 +177,29 @@ def call_ollama(
 
 
 def is_gold_in_hits(row: pd.Series, hits: list[dict[str, Any]]) -> tuple[bool, int | None]:
-    gold_context_key = str(row.get("context_key", "")).strip()
-    gold_kaynak = str(row.get("kaynak", "")).strip()
-    gold_madde = str(row.get("madde_no", "")).strip()
+    gold_context_key = normalize_for_match(row.get("context_key", ""))
+    gold_kaynak = normalize_for_match(row.get("kaynak", ""))
+    gold_madde = normalize_madde_no(row.get("madde_no", ""))
 
     for rank, hit in enumerate(hits, start=1):
-        hit_context_key = str(hit.get("context_key", "")).strip()
-        hit_kaynak = str(hit.get("kaynak", "")).strip()
-        hit_madde = str(hit.get("madde_no", "")).strip()
+        hit_context_key = normalize_for_match(hit.get("context_key", ""))
+        hit_kaynak = normalize_for_match(hit.get("kaynak", ""))
+        hit_madde = normalize_madde_no(hit.get("madde_no", ""))
 
         if gold_context_key and hit_context_key and gold_context_key == hit_context_key:
             return True, rank
 
         if gold_kaynak and gold_madde and hit_kaynak == gold_kaynak and hit_madde == gold_madde:
             return True, rank
+
+        # Kaynak adlarında küçük farklar varsa:
+        # örn. "Bilgi Edinme Kanunu" vs "Bilgi Edinme Hakkı Kanunu"
+        if gold_kaynak and hit_kaynak and gold_madde and hit_madde:
+            same_source_like = gold_kaynak in hit_kaynak or hit_kaynak in gold_kaynak
+            same_article = gold_madde == hit_madde
+
+            if same_source_like and same_article:
+                return True, rank
 
     return False, None
 
@@ -305,6 +318,44 @@ def main() -> None:
     output_df.to_csv(args.output_path, index=False, encoding="utf-8")
 
     print(f"\nGenerated answers saved to: {args.output_path}")
+
+def normalize_for_match(value) -> str:
+    if value is None:
+        return ""
+
+    text = str(value).strip().lower()
+
+    if text in {"nan", "none", "null"}:
+        return ""
+
+    text = text.replace("ı", "i")
+    text = text.replace("ğ", "g")
+    text = text.replace("ü", "u")
+    text = text.replace("ş", "s")
+    text = text.replace("ö", "o")
+    text = text.replace("ç", "c")
+
+    text = re.sub(r"\s+", " ", text)
+    text = text.strip()
+
+    return text
+
+
+def normalize_madde_no(value) -> str:
+    text = normalize_for_match(value)
+
+    # 8.0 -> 8
+    if re.fullmatch(r"\d+\.0", text):
+        text = text[:-2]
+
+    # "Madde 8" -> "8"
+    text = re.sub(r"^madde\s+", "", text)
+
+    # "Geçici Madde 13" gibi ifadeleri normalize et
+    text = text.replace("gecici madde", "gecici")
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text
 
 
 if __name__ == "__main__":
