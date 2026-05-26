@@ -166,7 +166,30 @@ def main() -> None:
         show_progress_bar=True,
     )
 
+    # Save an additional HuggingFace-compatible copy.
+    # This folder can be loaded later by CrossEncoder(path).
+    hf_output_dir = args.output_dir / "hf_model"
+    hf_output_dir.mkdir(parents=True, exist_ok=True)
+
+    model.model.save_pretrained(str(hf_output_dir), safe_serialization=True)
+    model.tokenizer.save_pretrained(str(hf_output_dir))
+
+    metadata = {
+        "base_model": args.base_model,
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "learning_rate": args.learning_rate,
+        "train_examples": len(train_examples),
+        "validation_examples": len(val_examples),
+    }
+
+    (args.output_dir / "training_metadata.json").write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
     print(f"\nFine-tuned reranker saved to: {args.output_dir}")
+    print(f"HuggingFace-compatible model saved to: {hf_output_dir}")
 
 
 if __name__ == "__main__":
