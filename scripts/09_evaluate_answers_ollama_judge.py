@@ -98,7 +98,7 @@ def extract_json(text: str) -> dict:
     except json.JSONDecodeError:
         pass
 
-    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    match = re.search(r"\{.*}", text, flags=re.DOTALL)
 
     if not match:
         return {
@@ -246,17 +246,17 @@ def main() -> None:
     summary_rows = [
         summarize(
             scored_df=base_scored,
-            method="Base RAG",
-            retrieval_setup="Dense retrieval top-5",
+            method="Base HF RAG",
+            retrieval_setup="BM25 retrieval top-5",
             prompt_name="Base prompt",
-            llm="qwen2.5:7b",
+            llm="Qwen2.5-7B-Instruct",
         ),
         summarize(
             scored_df=optimized_scored,
-            method="Optimized RAG",
+            method="Fine-tuned QLoRA RAG",
             retrieval_setup="BM25 retrieval top-5",
             prompt_name="Base prompt",
-            llm="qwen2.5:7b",
+            llm="Qwen2.5-7B-Instruct + QLoRA adapter",
         ),
     ]
 
