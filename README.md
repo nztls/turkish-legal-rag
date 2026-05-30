@@ -109,3 +109,246 @@ Gold eşleşme mantığı dataset'i değiştirmeden yapılır: sistemin getirdi�
 4. Reranker ablation
 5. Fine-tuned embedding veya reranker ablation
 6. Final rapor ve sunum tabloları
+
+---
+
+## Custom Dataset Usage
+
+This project supports running the RAG pipeline on external/custom document collections.  
+A custom dataset can be converted into the standard project corpus format and evaluated with the same retrieval and answer generation scripts.
+
+### Supported Custom Dataset Formats
+
+The system supports the following formats:
+
+1. A standard corpus CSV file
+2. A JSONL corpus file with optional benchmark JSON files
+3. A folder of raw `.txt` or `.md` documents
+
+---
+
+### 1. Standard Corpus CSV Format
+
+If the custom corpus is already prepared as a CSV file, it should contain the following columns:
+
+```text
+kaynak
+madde_no
+context_key
+context
+retrieval_text
+chunk_strategy
+kanun_no
+url
+```
+
+The most important columns are:
+
+* `context_key`: unique ID of each chunk
+* `context`: original text chunk
+* `retrieval_text`: text used by the retriever
+* `kaynak`: source/document name
+* `madde_no`: article or chunk identifier
+
+The benchmark file should contain at least:
+
+```text
+row_id
+soru
+cevap
+context_key
+kaynak
+madde_no
+score_valid
+```
+
+If `context_key`, `kaynak`, and `madde_no` are provided, retrieval metrics such as Recall@k, MRR, and nDCG can be calculated. If only `soru` and `cevap` are provided, answer-level evaluation can still be performed, but retrieval metrics cannot be fully computed.
+
+---
+
+### 2. Converting an External JSONL Dataset
+
+If the external corpus is provided as a JSONL file with fields such as `id`, `text`, `title`, and `metadata`, it can be converted into the standard project format.
+
+Expected files:
+
+```text
+data/custom/teacher_dataset/raw/corpus.jsonl
+data/custom/teacher_dataset/raw/rag_eval.json
+```
+
+Conversion command:
+
+```bash
+python scripts/17_convert_external_dataset.py \
+  --corpus-jsonl data/custom/teacher_dataset/raw/corpus.jsonl \
+  --rag-eval-json data/custom/teacher_dataset/raw/rag_eval.json \
+  --output-dir outputs/custom/teacher_dataset
+```
+
+This creates:
+
+```text
+outputs/custom/teacher_dataset/corpus.csv
+outputs/custom/teacher_dataset/benchmark_rag_eval.csv
+```
+
+---
+
+### 3. Converting Raw Text Documents
+
+If the external dataset is a folder of `.txt` or `.md` files, it can be converted into the standard corpus format.
+
+Expected folder:
+
+```text
+data/custom/teacher_dataset/raw_docs/
+```
+
+Conversion command:
+
+```bash
+python scripts/14_prepare_custom_corpus.py \
+  --input-dir data/custom/teacher_dataset/raw_docs \
+  --output-csv outputs/custom/teacher_dataset/corpus.csv
+```
+
+---
+
+### Retrieval Evaluation on a Custom Dataset
+
+After converting the external dataset, retrieval can be evaluated with BM25:
+
+```bash
+python scripts/02_evaluate_retrieval.py \
+  --corpus outputs/custom/teacher_dataset/corpus.csv \
+  --benchmark outputs/custom/teacher_dataset/benchmark_rag_eval.csv \
+  --retriever bm25 \
+  --output-prefix outputs/custom/teacher_dataset/retrieval_bm25
+```
+
+Dense retrieval can also be evaluated:
+
+```bash
+python scripts/02_evaluate_retrieval.py \
+  --corpus outputs/custom/teacher_dataset/corpus.csv \
+  --benchmark outputs/custom/teacher_dataset/benchmark_rag_eval.csv \
+  --retriever dense \
+  --index-dir outputs/custom/teacher_dataset/indexes/dense_faiss \
+  --output-prefix outputs/custom/teacher_dataset/retrieval_dense
+```
+
+Hybrid retrieval can be evaluated as follows:
+
+```bash
+python scripts/02_evaluate_retrieval.py \
+  --corpus outputs/custom/teacher_dataset/corpus.csv \
+  --benchmark outputs/custom/teacher_dataset/benchmark_rag_eval.csv \
+  --retriever hybrid \
+  --dense-weight 0.30 \
+  --bm25-weight 0.70 \
+  --index-dir outputs/custom/teacher_dataset/indexes/dense_faiss \
+  --output-prefix outputs/custom/teacher_dataset/retrieval_hybrid_dense30_bm2570
+```
+
+---
+
+### Answer Generation on a Custom Dataset
+
+Using Ollama:
+
+```bash
+python scripts/08_generate_answers_ollama.py \
+  --corpus outputs/custom/teacher_dataset/corpus.csv \
+  --benchmark outputs/custom/teacher_dataset/benchmark_rag_eval.csv \
+  --retriever bm25 \
+  --top-k 5 \
+  --prompt-type base \
+  --model qwen2.5:7b \
+  --output-path outputs/custom/teacher_dataset/predictions_bm25_qwen.csv
+```
+
+Using Hugging Face Qwen:
+
+```bash
+python scripts/13_generate_answers_hf_qlora.py \
+  --corpus outputs/custom/teacher_dataset/corpus.csv \
+  --benchmark outputs/custom/teacher_dataset/benchmark_rag_eval.csv \
+  --retriever bm25 \
+  --top-k 5 \
+  --prompt-type base \
+  --base-model Qwen/Qwen2.5-7B-Instruct \
+  --output-path outputs/custom/teacher_dataset/predictions_hf_qwen25_base.csv
+```
+
+Using a QLoRA adapter:
+
+```bash
+python scripts/13_generate_answers_hf_qlora.py \
+  --corpus outputs/custom/teacher_dataset/corpus.csv \
+  --benchmark outputs/custom/teacher_dataset/benchmark_rag_eval.csv \
+  --retriever bm25 \
+  --top-k 5 \
+  --prompt-type base \
+  --base-model Qwen/Qwen2.5-7B-Instruct \
+  --adapter-path outputs/custom/teacher_dataset/models/qwen25_qlora/adapter \
+  --output-path outputs/custom/teacher_dataset/predictions_hf_qwen25_qlora.csv
+```
+
+---
+
+### Important Evaluation Rule
+
+External benchmark or hidden teacher test data must not be used for fine-tuning. The correct workflow is:
+
+```text
+External documents → retrieval corpus
+External benchmark questions → evaluation only
+Fine-tuning on hidden benchmark → not allowed
+```
+
+This prevents data leakage and ensures that the evaluation reflects generalization to unseen data.
+
+## Quick Custom Dataset Run
+
+For an external JSONL dataset:
+
+```bash
+python scripts/17_convert_external_dataset.py \
+  --corpus-jsonl data/custom/teacher_dataset/raw/corpus.jsonl \
+  --rag-eval-json data/custom/teacher_dataset/raw/rag_eval.json \
+  --output-dir outputs/custom/teacher_dataset
+```
+
+Evaluate retrieval:
+
+```bash
+python scripts/02_evaluate_retrieval.py \
+  --corpus outputs/custom/teacher_dataset/corpus.csv \
+  --benchmark outputs/custom/teacher_dataset/benchmark_rag_eval.csv \
+  --retriever bm25 \
+  --output-prefix outputs/custom/teacher_dataset/retrieval_bm25
+```
+
+Generate answers:
+
+```bash
+python scripts/08_generate_answers_ollama.py \
+  --corpus outputs/custom/teacher_dataset/corpus.csv \
+  --benchmark outputs/custom/teacher_dataset/benchmark_rag_eval.csv \
+  --retriever bm25 \
+  --top-k 5 \
+  --prompt-type base \
+  --model qwen2.5:7b \
+  --output-path outputs/custom/teacher_dataset/predictions_bm25_qwen.csv
+```
+
+If the teacher provides only raw text files:
+
+```bash
+python scripts/14_prepare_custom_corpus.py \
+  --input-dir data/custom/teacher_dataset/raw_docs \
+  --output-csv outputs/custom/teacher_dataset/corpus.csv
+```
+
+Then the generated `corpus.csv` can be used with the same retrieval and answer generation scripts.
